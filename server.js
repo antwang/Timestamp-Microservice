@@ -1,52 +1,88 @@
-// server.js
-// where your node app starts
+"use strict";
 
-// init project
 var express = require("express");
+// var mongo = require('mongodb');
+var mongoose = require("mongoose");
+
+var bodyParser = require("body-parser");
+
+var cors = require("cors");
+
 var app = express();
 
-// enable CORS (https://en.wikipedia.org/wiki/Cross-origin_resource_sharing)
-// so that your API is remotely testable by FCC
-var cors = require("cors");
-app.use(cors({ optionSuccessStatus: 200 })); // some legacy browsers choke on 204
+// Basic Configuration
+var port = process.env.PORT || 3000;
 
-// http://expressjs.com/en/starter/static-files.html
-app.use(express.static("public"));
+/** this project needs a db !! **/
 
-// http://expressjs.com/en/starter/basic-routing.html
+mongoose.connect(process.env.MONGOLAB_URI);
+var db = mongoose.connection;
+db.on("error", console.error.bind(console, "connection error:"));
+db.once("open", function() {
+  // we're connected!
+  console.log("mongoose connected!");
+});
+app.use(cors());
+
+/** this project needs to parse POST bodies **/
+// you should mount the body-parser here
+// parse application/x-www-form-urlencoded
+app.use(bodyParser.urlencoded({ extended: false }));
+
+app.use("/public", express.static(process.cwd() + "/public"));
+
 app.get("/", function(req, res) {
-  res.sendFile(__dirname + "/views/index.html");
+  res.sendFile(process.cwd() + "/views/index.html");
+});
+// create url schema
+var urlSchema = new mongoose.Schema({
+  original_url: String,
+  short_url: Number
 });
 
+// create url Model on urlSchema
+var UrlModel = mongoose.model("UrlModel", urlSchema);
 // your first API endpoint...
 app.get("/api/hello", function(req, res) {
   res.json({ greeting: "hello API" });
 });
-// API Project: Timestamp Microservice
-app.get("/api/timestamp/:date_string", function(req, res) {
-  var date_string = req.params.date_string;
-  let d = "";
-  if (date_string != "") {
-    d = new Date(date_string);
-    if (d.toString() == "Invalid Date") {
-      return res.json({ unix: null, utc: "Invalid Date" });
+
+app.get("/api/shorturl/:urlnum", function(req, res) {
+  UrlModel.findOne({ short_url: req.params.urlnum }, function(err, record) {
+    if (err) return res.json({ error: err });
+    if (record) {
+      res.redirect(302, record.original_url);
+    } else {
+      res.json({ msg: "not exist" });
     }
-    res.json({ unix: d.getTime(), utc: d.toUTCString() });
-  } else {
-    d = new Date();
-    res.json({ unix: d.getTime(), utc: d.toUTCString() });
-  }
-});
-// API Project: Request Header Parser Microservice
-app.get("/api/whoami", function(req, res) {
-  res.json({
-    ipaddress: req.ip,
-    language: req.get("Accept-Language"),
-    software: req.get("User-Agent")
   });
 });
 
-// listen for requests :)
-var listener = app.listen(process.env.PORT, function() {
-  console.log("Your app is listening on port " + listener.address().port);
+app.post("/api/shorturl/new", function(req, res) {
+  const url = req.body.url;
+  UrlModel.findOne({ original_url: url }, function(err, urlRecord) {
+    if (err) return console.log(err);
+    if (urlRecord) {
+      res.json({
+        original_url: urlRecord.original_url,
+        short_url: urlRecord.short_url
+      });
+    } else {
+      UrlModel.count({}, function(err, count) {
+        if (err) return console.log(`count err ${err}`);
+        var newUrl = new UrlModel({ original_url: url, short_url: count + 1 });
+        newUrl.save(function(err, newUrl) {
+          if (err) return console.log(err);
+          res.json({
+            original_url: newUrl.original_url,
+            short_url: newUrl.short_url
+          });
+        });
+      });
+    }
+  });
+});
+
+app.listen(port, function() {
+  console.log("Node.js listening ...");
 });
